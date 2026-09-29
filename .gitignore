@@ -2,6 +2,10 @@ node_modules/
 build/
 .env
 .env.local
+
+# Local deployment config — environment-specific; copy the .example files
+docker-compose.yaml
+docker-compose.yml
 *.tgz
 .DS_Store
 
