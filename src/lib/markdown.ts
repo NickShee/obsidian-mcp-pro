@@ -148,6 +148,61 @@ export function stringifyYamlFrontmatter(
 }
 
 /**
+ * Apply `defaults` to `content` as a bottom layer of frontmatter.
+ *
+ * Semantics — deliberately "fill only, never overwrite":
+ *   - A key already present (with any value, including `null`) is left alone.
+ *   - Only keys absent from the note are appended.
+ *   - When the note already has a frontmatter block, the block is edited with
+ *     a text splice so its comments, quoting, CRLF endings and key order are
+ *     preserved byte-for-byte; the new keys are appended at the end.
+ *   - When the note has no frontmatter block, one is created from the missing
+ *     keys and prepended to the body.
+ *   - Malformed / anchor-bearing / oversized frontmatter is returned
+ *     untouched: we refuse to rewrite a block we cannot round-trip safely.
+ *
+ * Returns `content` unchanged when `defaults` is null or nothing is missing,
+ * so callers can compare identity to skip a redundant write.
+ */
+export function appendDefaultFrontmatterKeys(
+  content: string,
+  defaults: Record<string, unknown> | null,
+): string {
+  if (!defaults) return content;
+
+  const parsed = parseStrictYamlFrontmatter(content);
+  if (parsed.error || parsed.oversized) return content;
+
+  const missing: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(defaults)) {
+    if (!Object.prototype.hasOwnProperty.call(parsed.data, key)) {
+      missing[key] = value;
+    }
+  }
+  if (Object.keys(missing).length === 0) return content;
+
+  if (!parsed.hasFrontmatter) {
+    return stringifyYamlFrontmatter(content, missing);
+  }
+
+  const scan = scanYamlFrontmatter(content);
+  if (scan.kind !== "found") return content;
+  const yamlStart = frontmatterOpenEnd(content);
+  if (yamlStart === null) return content;
+
+  const added = quoteWikilinksInFrontmatter(
+    yaml.dump(missing, { lineWidth: -1, noRefs: true, sortKeys: false }),
+  );
+  const separator = scan.yaml === "" || scan.yaml.endsWith("\n") ? "" : "\n";
+  const newYaml = scan.yaml + separator + added;
+  return (
+    content.slice(0, yamlStart) +
+    newYaml +
+    content.slice(yamlStart + scan.yaml.length)
+  );
+}
+
+/**
  * Parse YAML frontmatter from markdown content. Malformed YAML yields empty
  * data and the raw content — a single broken note must not abort vault-wide
  * loops (tag enumeration, frontmatter search, link graph).

@@ -654,3 +654,155 @@ describe("write handlers — delete_note", () => {
     expect(block._meta?.["obsidian-mcp-pro/untrustedContentLabel"]).toBe("delete_note failed referrers");
   });
 });
+
+describe("write handlers — OBSIDIAN_DEFAULT_FRONTMATTER", () => {
+  const read = (p: string) => fs.readFile(path.join(env.vaultDir, p), "utf-8");
+
+  beforeEach(() => {
+    process.env.OBSIDIAN_DEFAULT_FRONTMATTER = JSON.stringify({
+      tags: [],
+      status: "draft",
+      aliases: [],
+    });
+  });
+
+  afterEach(() => {
+    delete process.env.OBSIDIAN_DEFAULT_FRONTMATTER;
+  });
+
+  it("fills defaults (incl. a local-date created) on a brand-new note", async () => {
+    const result = await env.client.callTool({
+      name: "create_note",
+      arguments: { path: "defaults-new.md", content: "Body." },
+    });
+    expect(isError(result)).toBe(false);
+
+    const onDisk = await read("defaults-new.md");
+    expect(onDisk.startsWith("---\n")).toBe(true);
+    // js-yaml quotes a bare YYYY-MM-DD so it stays a string instead of being
+    // re-parsed as a YAML timestamp.
+    expect(onDisk).toMatch(/created: '?\d{4}-\d{2}-\d{2}'?\n/);
+    expect(onDisk).toMatch(/status: draft/);
+    expect(onDisk).toMatch(/tags: \[\]/);
+    expect(onDisk).toContain("Body.");
+  });
+
+  it("lets an explicit argument override the default, then fills the rest", async () => {
+    const result = await env.client.callTool({
+      name: "create_note",
+      arguments: {
+        path: "defaults-override.md",
+        content: "Body.",
+        frontmatter: JSON.stringify({ status: "published", tags: ["x"] }),
+      },
+    });
+    expect(isError(result)).toBe(false);
+
+    const onDisk = await read("defaults-override.md");
+    expect(onDisk).toMatch(/status: published/);
+    expect(onDisk).toContain("- x");
+    expect(onDisk).not.toMatch(/status: draft/);
+    expect(onDisk).toMatch(/aliases: \[\]/);
+  });
+
+  it("only fills missing keys when the body already carries frontmatter", async () => {
+    const body = "---\ntitle: My Note\nstatus: published\n---\n\nBody.\n";
+    const result = await env.client.callTool({
+      name: "create_note",
+      arguments: { path: "defaults-existing.md", content: body },
+    });
+    expect(isError(result)).toBe(false);
+
+    const onDisk = await read("defaults-existing.md");
+    // Original keys keep their value AND their position; only gaps are filled.
+    expect(onDisk.startsWith("---\ntitle: My Note\nstatus: published\n")).toBe(true);
+    expect(onDisk).not.toMatch(/status: draft/);
+    expect(onDisk).toMatch(/tags: \[\]/);
+    expect(onDisk).toContain("Body.");
+  });
+
+  it("preserves comments and formatting inside an existing block", async () => {
+    const body = "---\n# keep me\nstatus: draft\n---\n\nBody.\n";
+    const result = await env.client.callTool({
+      name: "create_note",
+      arguments: { path: "defaults-comment.md", content: body },
+    });
+    expect(isError(result)).toBe(false);
+
+    const onDisk = await read("defaults-comment.md");
+    expect(onDisk.startsWith("---\n# keep me\nstatus: draft\n")).toBe(true);
+    expect(onDisk).toContain("# keep me");
+  });
+
+  it("backfills append_to_note (creating a block) but never stamps created", async () => {
+    await fs.writeFile(
+      path.join(env.vaultDir, "append-defaults.md"),
+      "line one\n",
+      "utf-8"
+    );
+
+    const result = await env.client.callTool({
+      name: "append_to_note",
+      arguments: { path: "append-defaults.md", content: "line two" },
+    });
+    expect(isError(result)).toBe(false);
+
+    const onDisk = await read("append-defaults.md");
+    expect(onDisk.startsWith("---\n")).toBe(true);
+    expect(onDisk).toMatch(/status: draft/);
+    expect(onDisk).not.toMatch(/created:/);
+    expect(onDisk).toContain("line one");
+    expect(onDisk).toContain("line two");
+  });
+
+  it("backfills prepend_to_note after the completed frontmatter block", async () => {
+    await fs.writeFile(
+      path.join(env.vaultDir, "prepend-defaults.md"),
+      "---\nstatus: published\n---\n\nbody\n",
+      "utf-8"
+    );
+
+    const result = await env.client.callTool({
+      name: "prepend_to_note",
+      arguments: { path: "prepend-defaults.md", content: "top" },
+    });
+    expect(isError(result)).toBe(false);
+
+    const onDisk = await read("prepend-defaults.md");
+    expect(onDisk.startsWith("---\nstatus: published\n")).toBe(true);
+    expect(onDisk).toMatch(/tags: \[\]/);
+    expect(onDisk).not.toMatch(/status: draft/);
+    expect(onDisk).not.toMatch(/created:/);
+    // Prepended content sits directly below the frontmatter, above the old body.
+    expect(onDisk).toMatch(/---\ntop\n/);
+    expect(onDisk.indexOf("top")).toBeLessThan(onDisk.indexOf("body"));
+  });
+
+  it("ignores a malformed or non-object value instead of writing junk", async () => {
+    process.env.OBSIDIAN_DEFAULT_FRONTMATTER = "{ not json }";
+    const bad = await env.client.callTool({
+      name: "create_note",
+      arguments: { path: "bad-defaults.md", content: "Body." },
+    });
+    expect(isError(bad)).toBe(false);
+    expect(await read("bad-defaults.md")).toBe("Body.");
+
+    process.env.OBSIDIAN_DEFAULT_FRONTMATTER = '["not","an","object"]';
+    const arr = await env.client.callTool({
+      name: "create_note",
+      arguments: { path: "arr-defaults.md", content: "Body." },
+    });
+    expect(isError(arr)).toBe(false);
+    expect(await read("arr-defaults.md")).toBe("Body.");
+  });
+
+  it("stays byte-identical to the bare body when the variable is unset", async () => {
+    delete process.env.OBSIDIAN_DEFAULT_FRONTMATTER;
+    const result = await env.client.callTool({
+      name: "create_note",
+      arguments: { path: "no-defaults.md", content: "Just the body." },
+    });
+    expect(isError(result)).toBe(false);
+    expect(await read("no-defaults.md")).toBe("Just the body.");
+  });
+});

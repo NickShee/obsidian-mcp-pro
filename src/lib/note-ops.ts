@@ -24,6 +24,7 @@ import {
   planMoveRewrites,
   type RewritePlan,
 } from "./link-rewriter.js";
+import { appendDefaultFrontmatterKeys } from "./markdown.js";
 
 const COPY_FALLBACK_CODES = new Set([
   "EXDEV",
@@ -154,7 +155,8 @@ export async function updateNote(
 export async function appendToNote(
   vaultPath: string,
   relativePath: string,
-  content: string
+  content: string,
+  defaults: Record<string, unknown> | null = null
 ): Promise<void> {
   assertMarkdownNotePath(relativePath);
   const fullPath = await resolveVaultPathSafe(vaultPath, relativePath, "write");
@@ -172,8 +174,13 @@ export async function appendToNote(
     } finally {
       await opened.handle.close();
     }
-    const separator = existing.endsWith("\n") ? "" : "\n";
-    const next = existing + separator + content;
+    // Fill missing default frontmatter keys *before* appending, so a freshly
+    // created default block always lands at the very top of the note.
+    // `defaults` is null unless OBSIDIAN_DEFAULT_FRONTMATTER is configured,
+    // in which case `filled === existing` and behaviour is unchanged.
+    const filled = appendDefaultFrontmatterKeys(existing, defaults);
+    const separator = filled.endsWith("\n") ? "" : "\n";
+    const next = filled + separator + content;
     assertNoteContentSize(relativePath, next);
     await atomicWriteFile(fullPath, next);
   });
@@ -214,7 +221,8 @@ function extractLeadingFrontmatter(content: string): string | null {
 export async function prependToNote(
   vaultPath: string,
   relativePath: string,
-  content: string
+  content: string,
+  defaults: Record<string, unknown> | null = null
 ): Promise<void> {
   assertMarkdownNotePath(relativePath);
   const fullPath = await resolveVaultPathSafe(vaultPath, relativePath, "write");
@@ -233,19 +241,24 @@ export async function prependToNote(
       await opened.handle.close();
     }
 
+    // Fill missing default frontmatter keys before inserting, so the prepended
+    // content still lands immediately after a now-complete frontmatter block.
+    // `defaults` is null unless OBSIDIAN_DEFAULT_FRONTMATTER is configured.
+    const filled = appendDefaultFrontmatterKeys(existing, defaults);
+
     // Detect frontmatter by scanning only the first N lines instead of
     // running a lazy-match regex across the full file. A malformed note with
     // an opening `---` but no closing delimiter would otherwise scan the
     // entire (potentially multi-MB) content and block the event loop.
-    const frontmatter = extractLeadingFrontmatter(existing);
+    const frontmatter = extractLeadingFrontmatter(filled);
 
     let result: string;
     if (frontmatter) {
-      const rest = existing.slice(frontmatter.length);
+      const rest = filled.slice(frontmatter.length);
       const separator = frontmatter.endsWith("\n") ? "" : "\n";
       result = frontmatter + separator + content + "\n" + rest;
     } else {
-      result = content + "\n" + existing;
+      result = content + "\n" + filled;
     }
 
     assertNoteContentSize(relativePath, result);

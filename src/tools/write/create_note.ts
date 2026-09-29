@@ -2,12 +2,34 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { writeNote } from "../../lib/vault.js";
 import { defineTool, text, error } from "../../lib/tool-seam.js";
+import { formatLocalDateOnly } from "../../lib/dates.js";
+import { getDefaultFrontmatter } from "../../lib/frontmatter-defaults.js";
 import {
   escapeControlChars,
   ensureMdExtension,
-  buildFrontmatterContent,
+  composeCreateContent,
   isPlainObject,
 } from "./shared.js";
+
+/**
+ * Defaults for a brand-new note: the configured defaults plus a server-side
+ * `created` stamp.
+ *
+ * `created` is placed first so it leads the block, and is computed here
+ * because a calling agent has no reliable notion of "today". An explicit
+ * `created` in `OBSIDIAN_DEFAULT_FRONTMATTER` wins (spread order), which also
+ * serves as the escape hatch for users who don't want an automatic date.
+ *
+ * It is only ever added for NEW notes. Backfilling an existing note
+ * (append_to_note / prepend_to_note) must not stamp today's date as that
+ * note's creation date.
+ */
+function newNoteDefaults(
+  defaults: Record<string, unknown> | null
+): Record<string, unknown> | null {
+  if (defaults === null) return null;
+  return { created: formatLocalDateOnly(), ...defaults };
+}
 
 export function registerCreateNote(server: McpServer, vaultPath: string): void {
   defineTool(
@@ -51,7 +73,7 @@ export function registerCreateNote(server: McpServer, vaultPath: string): void {
       const resolvedPath = ensureMdExtension(notePath);
       const displayedPath = escapeControlChars(resolvedPath);
 
-      let finalContent: string;
+      let callerFm: Record<string, unknown> | undefined;
 
       if (frontmatter) {
         let parsed: unknown;
@@ -65,10 +87,17 @@ export function registerCreateNote(server: McpServer, vaultPath: string): void {
             'Error: frontmatter must be a JSON object (e.g. \'{"status":"draft"}\'), not an array, string, number, boolean, or null.'
           );
         }
-        finalContent = buildFrontmatterContent(parsed, content);
-      } else {
-        finalContent = content;
+        callerFm = parsed;
       }
+
+      // Caller values win, then configured defaults fill whatever is still
+      // missing. With OBSIDIAN_DEFAULT_FRONTMATTER unset this reduces to the
+      // original behaviour: caller frontmatter only, or the bare body.
+      const finalContent = composeCreateContent(
+        content,
+        newNoteDefaults(getDefaultFrontmatter()),
+        callerFm
+      );
 
       try {
         await writeNote(vaultPath, resolvedPath, finalContent, {

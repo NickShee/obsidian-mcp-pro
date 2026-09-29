@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { prependToNote } from "../../lib/vault.js";
 import { defineTool, text } from "../../lib/tool-seam.js";
+import { getDefaultFrontmatter } from "../../lib/frontmatter-defaults.js";
 import { escapeControlChars, ensureMdExtension } from "./shared.js";
 
 export function registerPrependToNote(
@@ -40,7 +41,12 @@ export function registerPrependToNote(
     },
     async ({ path: notePath, content }) => {
       const resolvedPath = ensureMdExtension(notePath);
-      await prependToNote(vaultPath, resolvedPath, content);
+      await prependToNote(
+        vaultPath,
+        resolvedPath,
+        content,
+        getDefaultFrontmatter()
+      );
       return text(
         `Prepended content to '${escapeControlChars(resolvedPath)}'.`
       );

@@ -1,5 +1,8 @@
 import { escapeControlChars } from "../../lib/errors.js";
-import { updateFrontmatter } from "../../lib/markdown.js";
+import {
+  appendDefaultFrontmatterKeys,
+  updateFrontmatter,
+} from "../../lib/markdown.js";
 
 export { escapeControlChars };
 
@@ -12,6 +15,25 @@ export function buildFrontmatterContent(
   body: string
 ): string {
   return updateFrontmatter(body, frontmatterObj);
+}
+
+/**
+ * Build the final content for `create_note`.
+ *
+ * Precedence: explicit `callerFm` > frontmatter already present in `body` >
+ * `defaults`. The caller's values overwrite (existing behaviour, untouched);
+ * the configured defaults are then applied as a bottom layer that only fills
+ * keys still missing — they never overwrite anything.
+ */
+export function composeCreateContent(
+  body: string,
+  defaults: Record<string, unknown> | null,
+  callerFm?: Record<string, unknown>
+): string {
+  const withCaller = callerFm
+    ? buildFrontmatterContent(callerFm, body)
+    : body;
+  return appendDefaultFrontmatterKeys(withCaller, defaults);
 }
 
 // Frontmatter must be a YAML mapping at the root. `JSON.parse` happily returns
