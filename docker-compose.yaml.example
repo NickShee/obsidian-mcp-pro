@@ -59,12 +59,27 @@ services:
       OBSIDIAN_EMBEDDING_URL: ${OBSIDIAN_EMBEDDING_URL}
       OBSIDIAN_EMBEDDING_API_KEY: ${OBSIDIAN_EMBEDDING_API_KEY}
 
-      # 新建笔记的默认 frontmatter（可选）：作为最底层「只补缺失」，绝不覆盖已有键
-      #   - 已有 frontmatter：只追加缺失键，原有键的值/顺序/注释/引号逐字节不动
-      #   - 无 frontmatter：补一个完整默认块
-      #   - create_note 额外写入服务端本地日期的 created；append/prepend 回填旧笔记时不写 created
-      # 取消注释即启用；不启用时的写入行为与以前逐字节一致
-      # OBSIDIAN_DEFAULT_FRONTMATTER: '{"tags":[],"status":"draft","aliases":[]}'
+      # ── 默认 frontmatter：混合模式（默认启用）──
+      # 模板打底 + env 覆盖：两个来源同时生效，env 里出现的键压过模板。
+      # 模板必须是 vault 内的 .md 文件（会走 vault 边界与 OBSIDIAN_READ_PATHS 校验）。
+      # 改模板即可改变新笔记的默认 fm，不需要重启容器。
+      OBSIDIAN_FM_SOURCE: template
+      OBSIDIAN_FRONTMATTER_TEMPLATE: 99.templates/tp-01-general.md
+
+      # env 覆盖层：只写需要「压过模板」的字段。
+      # 留成空对象 = 完全以模板为准；要临时钉住某个字段再往里加，例如 '{"status":"draft"}'。
+      # 若只想用 env、完全不读模板：把 OBSIDIAN_FM_SOURCE 改成 env（或整行删掉）。
+      OBSIDIAN_DEFAULT_FRONTMATTER: '{}'
+
+      # 值里支持两种占位符：
+      #   {{date:YYYY-MM-DD}} / {{time:HH:mm}}   （Obsidian 核心语法）
+      #   <% tp.date.now("YYYY-MM-DD", 7) %>     （Templater 白名单：now / tomorrow / yesterday）
+      # 白名单外的 Templater 表达式（如 tp.system.prompt）会告警并丢弃该字段。
+      # 写入语义仍是「只补缺失」：已有 fm 只追加缺失键，原有键的值/顺序/注释逐字节不动。
+
+      # 自动维护的字段：每次写入（新建/追加/前置/改 fm/区块编辑）都刷新为当天日期。
+      # 唯一会「覆盖已有键」的口子；批量工具（move/delete/rename_tag）刻意不触发。
+      OBSIDIAN_MODIFIED_FIELDS: modified
 
     command:
       - "--transport=http"
