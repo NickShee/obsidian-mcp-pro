@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `OBSIDIAN_DEFAULT_FRONTMATTER`: a JSON object of frontmatter keys applied as a *bottom layer* by `create_note`, `append_to_note` and `prepend_to_note`. Existing keys are never overwritten — only missing keys are appended, so a note's own values, key order, comments and formatting survive untouched; a note without any frontmatter gets a complete default block. When filling an existing block the keys are spliced in as text rather than re-serialized, so YAML comments and quoting are preserved. `create_note` additionally stamps `created` with the server's local date (`YYYY-MM-DD`), computed server-side so a calling agent never has to guess "today"; an explicit `created` in the config wins, and `append_to_note` / `prepend_to_note` never stamp it (that would misreport an old note's creation date). Unset or malformed values leave every write path byte-identical to the previous behaviour.
+
 ### Changed
 
 - Removed maintainer-only strategy, experiment notes, and draft outreach copy from the tracked documentation while keeping contributor workflow configuration under `docs/agents/`.

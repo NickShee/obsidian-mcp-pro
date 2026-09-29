@@ -2,15 +2,16 @@
 
 obsidian-mcp-pro **v4.0.1** 本地源码构建部署包（解决 LobeHub 连接器断联/工具 0 问题）。
 
-## 背景：本包相对 npm `obsidian-mcp-pro@latest` 的三处源码修改
+## 背景：本包相对 npm `obsidian-mcp-pro@latest` 的四处源码修改
 
 | 修改 | 文件/位置 | 作用 |
 |:--|:--|:--|
 | ① 错误消息 | `src/http-server.ts` 错误路径 | 400 消息追加 `(No valid session ID provided)`，让 LobeHub `listTools` 能识别 session 失效（为自愈铺路） |
 | ② SSE 心跳（可配置） | `src/http-server.ts` GET handler | 按 `SSE_KEEPALIVE_INTERVAL_MS` 周期写 SSE 注释行 `:\n\n`，防止代理/NAT/反代静默超时掐断长连接。开关注：`SSE_KEEPALIVE_ENABLED`；**关闭时完全不启动心跳（不建 timer、不注册监听、不写字节），无任何副作用** |
 | ③ Stateless 模式（可选） | `src/http-server.ts` POST/GET/DELETE | `STATELESS_MODE=true` 时每次请求独立创建 transport（`sessionIdGenerator: undefined`），无 sessionId、无长连接、无 GET SSE 流，**彻底免疫反代掐断断联**（与 Outline MCP 同款架构）；关闭（默认 `false`）则保留 stateful + SSE 心跳原逻辑。切换仅改环境变量、重启容器，**无副作用** |
+| ④ 默认 frontmatter（可选） | `src/lib/frontmatter-defaults.ts`（新增）+ `create_note` / `append_to_note` / `prepend_to_note` | `OBSIDIAN_DEFAULT_FRONTMATTER` 配置一组固定 frontmatter 键，写入时作为**最底层、只补缺失**：已有键的值、顺序、注释、引号逐字节不动，缺失键追加到 YAML 块尾部（文本级插入，不重序列化）。`create_note` 额外写入服务端本地日期的 `created`；`append` / `prepend` 回填旧笔记时**不写** `created`。未设置该变量时行为与原来逐字节一致 |
 
-> 注意：本包是从源码构建（`npm ci` + `npm run build`），入口为 `node dist/index.js`，
+> 注意：本包是从源码构建（`npm ci` + `npm run build`），入口为 `node build/index.js`，
 > 不再走 `npm install -g obsidian-mcp-pro@latest`。
 
 ## 目录结构
@@ -19,10 +20,10 @@ obsidian-mcp-pro **v4.0.1** 本地源码构建部署包（解决 LobeHub 连接�
 obsidian-mcp-pro-localcompose/
 ├── Dockerfile            # 本地源码构建（npm ci + tsc）
 ├── docker-compose.yaml   # 测试环境（container_name: obsidian-mcp-pro-test，端口 3334）
-├── entrypoint.sh         # 入口（等待 vault + node dist/index.js）
+├── entrypoint.sh         # 入口（等待 vault + node build/index.js）
 ├── .dockerignore
 ├── .env.example          # 复制为 .env 后填写
-├── src/                  # 修改后的源码（含三处改动）
+├── src/                  # 修改后的源码（含四处改动）
 ├── package.json / package-lock.json / tsconfig*.json ...
 ├── verify-sse.cjs        # SDK 验证脚本（工具列表 + 长连接稳定性）
 └── README.md
@@ -57,6 +58,28 @@ obsidian-mcp-pro-localcompose/
 > 无副作用保证：stateless 下 GET/DELETE 走 405 分支，不会误入 stateful 的 session/SSE/心跳逻辑；
 > 心跳 timer 只存在于 stateful 的 GET SSE 流内，stateless 下不会创建；session 表不参与 stateless 请求。
 > 单元测试已覆盖两种模式的开关切换（`src/__tests__/http-server.test.ts`）。
+
+## 环境变量（默认 frontmatter）
+
+`OBSIDIAN_DEFAULT_FRONTMATTER` 用 JSON 对象声明一组固定 frontmatter 键，让 `create_note` / `append_to_note` / `prepend_to_note` 写入的每一篇笔记都带一致的 frontmatter 骨架，不必在提示词里重复（Obsidian 模板不参与 MCP 写入路径）。
+
+```json
+{"tags":[],"status":"draft","aliases":[]}
+```
+
+合并规则——**只补缺失，绝不覆盖**：
+
+| 场景 | 结果 |
+|:--|:--|
+| `create_note` 新建空笔记 | 写入完整默认块 + 自动 `created`（服务端本地日期 `YYYY-MM-DD`） |
+| `create_note` 同时传了 `frontmatter` 参数 | 参数值优先，默认值只补参数没给的键 |
+| 正文 / 旧笔记**已有** frontmatter | 只追加缺失键，已有键的值、顺序、注释、引号全部保留 |
+| `append_to_note` / `prepend_to_note` 命中无 frontmatter 的旧笔记 | 补一个完整默认块（**不含** `created`，否则会把今天误当旧笔记的创建日） |
+| 变量未设置 / 值非法（非 JSON、非对象） | 完全不介入，写入结果与未启用时**逐字节一致** |
+
+> 在 JSON 里显式写 `created` 会覆盖自动戳，这是「不想要自动创建日期」的出口。
+> 序列化器会给裸 `YYYY-MM-DD` 加引号（输出 `created: '2026-09-29'`），以保持字符串类型、避免被重新解析成 YAML 时间戳。
+> 关键实现：补键走**文本级插入**（只往原 YAML 块尾部追加缺失行），不是整块重序列化——所以旧笔记的 YAML 注释与引号不会被 js-yaml 规范化掉。单测覆盖见 `src/__tests__/handlers/write.test.ts`。
 
 ## 部署步骤（宿主机 /docker 下执行）
 
