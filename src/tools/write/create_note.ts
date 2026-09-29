@@ -3,10 +3,15 @@ import { z } from "zod";
 import { writeNote } from "../../lib/vault.js";
 import { defineTool, text, error } from "../../lib/tool-seam.js";
 import {
+  buildModifiedPatch,
+  resolveDefaultFrontmatter,
+} from "../../lib/frontmatter-defaults.js";
+import {
   escapeControlChars,
   ensureMdExtension,
-  buildFrontmatterContent,
+  composeCreateContent,
   isPlainObject,
+  newNoteDefaults,
 } from "./shared.js";
 
 export function registerCreateNote(server: McpServer, vaultPath: string): void {
@@ -51,7 +56,7 @@ export function registerCreateNote(server: McpServer, vaultPath: string): void {
       const resolvedPath = ensureMdExtension(notePath);
       const displayedPath = escapeControlChars(resolvedPath);
 
-      let finalContent: string;
+      let callerFm: Record<string, unknown> | undefined;
 
       if (frontmatter) {
         let parsed: unknown;
@@ -65,10 +70,20 @@ export function registerCreateNote(server: McpServer, vaultPath: string): void {
             'Error: frontmatter must be a JSON object (e.g. \'{"status":"draft"}\'), not an array, string, number, boolean, or null.'
           );
         }
-        finalContent = buildFrontmatterContent(parsed, content);
-      } else {
-        finalContent = content;
+        callerFm = parsed;
       }
+
+      // Caller values win, then configured defaults fill whatever is still
+      // missing. With OBSIDIAN_DEFAULT_FRONTMATTER unset this reduces to the
+      // original behaviour: caller frontmatter only, or the bare body.
+      const finalContent = composeCreateContent(
+        content,
+        newNoteDefaults(
+          await resolveDefaultFrontmatter(vaultPath),
+          buildModifiedPatch()
+        ),
+        callerFm
+      );
 
       try {
         await writeNote(vaultPath, resolvedPath, finalContent, {

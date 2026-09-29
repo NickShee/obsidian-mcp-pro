@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   parseFrontmatter,
   parseStrictYamlFrontmatter,
+  setFrontmatterFields,
   updateFrontmatter,
   extractWikilinks,
   extractWikilinkSpans,
@@ -780,5 +781,77 @@ describe("formatWikilinkTarget", () => {
   it("strips the .md extension on output", () => {
     const out = formatWikilinkTarget("a/b/c.md", "c", ["a/b/c.md"]);
     expect(out).toBe("c");
+  });
+});
+
+describe("setFrontmatterFields", () => {
+  it("rewrites only the target key line, leaving everything else byte-identical", () => {
+    const input = [
+      "---",
+      "# keep this comment",
+      "title: My Note",
+      "modified: 2020-01-01",
+      "tags: [a, b]",
+      "---",
+      "",
+      "Body.",
+      "",
+    ].join("\n");
+
+    expect(setFrontmatterFields(input, { modified: "2026-09-29" })).toBe(
+      [
+        "---",
+        "# keep this comment",
+        "title: My Note",
+        "modified: '2026-09-29'",
+        "tags: [a, b]",
+        "---",
+        "",
+        "Body.",
+        "",
+      ].join("\n")
+    );
+  });
+
+  it("appends an absent key at the end of the block", () => {
+    expect(
+      setFrontmatterFields("---\ntitle: T\n---\n\nBody.\n", {
+        modified: "2026-09-29",
+      })
+    ).toBe("---\ntitle: T\nmodified: '2026-09-29'\n---\n\nBody.\n");
+  });
+
+  it("does not mistake a longer key for a match", () => {
+    const out = setFrontmatterFields("---\nmodified_at: 2020-01-01\n---\n\nBody.\n", {
+      modified: "2026-09-29",
+    });
+    expect(out).toContain("modified_at: 2020-01-01");
+    expect(out).toContain("modified: '2026-09-29'");
+  });
+
+  it("leaves a note with no frontmatter alone unless createIfMissing is set", () => {
+    expect(
+      setFrontmatterFields("Body only.\n", { modified: "2026-09-29" })
+    ).toBe("Body only.\n");
+    expect(
+      setFrontmatterFields("Body only.\n", { modified: "2026-09-29" }, true)
+    ).toBe("---\nmodified: '2026-09-29'\n---\nBody only.\n");
+  });
+
+  it("returns malformed frontmatter untouched rather than rewriting it", () => {
+    const input = "---\nfoo: [1, 2\n---\n\nBody.\n";
+    expect(setFrontmatterFields(input, { modified: "2026-09-29" })).toBe(input);
+  });
+
+  it("is a no-op for an empty patch", () => {
+    const input = "---\ntitle: T\n---\n\nBody.\n";
+    expect(setFrontmatterFields(input, {})).toBe(input);
+  });
+
+  it("is idempotent for a repeated value", () => {
+    const once = setFrontmatterFields("---\nmodified: 2020-01-01\n---\n\nBody.\n", {
+      modified: "2026-09-29",
+    });
+    expect(setFrontmatterFields(once, { modified: "2026-09-29" })).toBe(once);
   });
 });

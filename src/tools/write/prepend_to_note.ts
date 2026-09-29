@@ -2,6 +2,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { prependToNote } from "../../lib/vault.js";
 import { defineTool, text } from "../../lib/tool-seam.js";
+import {
+  resolveDefaultFrontmatter,
+  stripAutoManagedFields,
+} from "../../lib/frontmatter-defaults.js";
 import { escapeControlChars, ensureMdExtension } from "./shared.js";
 
 export function registerPrependToNote(
@@ -40,7 +44,14 @@ export function registerPrependToNote(
     },
     async ({ path: notePath, content }) => {
       const resolvedPath = ensureMdExtension(notePath);
-      await prependToNote(vaultPath, resolvedPath, content);
+      await prependToNote(
+        vaultPath,
+        resolvedPath,
+        content,
+        // Backfilling an existing note: see append_to_note — the server-managed
+        // fields are stripped so an old note is not restamped with today's date.
+        stripAutoManagedFields(await resolveDefaultFrontmatter(vaultPath))
+      );
       return text(
         `Prepended content to '${escapeControlChars(resolvedPath)}'.`
       );

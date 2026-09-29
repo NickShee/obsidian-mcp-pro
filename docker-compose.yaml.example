@@ -1,0 +1,86 @@
+# ============================================================
+# obsidian-mcp-pro — 部署配置模板（推荐标准化版本）
+#
+# 这是模板文件，本身不参与运行。实际部署请复制成 docker-compose.yaml：
+#     cp docker-compose.yaml.example docker-compose.yaml
+#     cp .env.example .env          # 填 vault 路径 / token / embedding key
+#     docker compose build
+#     docker compose up -d
+#
+# docker-compose.yaml 已被 .gitignore 忽略（含环境相关、逐机不同的取值）。
+# 镜像 tag 约定：nick-customized
+# ============================================================
+
+name: ob-mcp-pro-nick
+
+services:
+  ob-mcp-pro-nick:
+    build: .
+    image: ghcr.io/nickshee/obsidian-mcp-pro:nick-customized
+
+    # 容器名被 nginx-proxy-manager 的上游直接引用（ob-main.xshome.cc 的转发目标），
+    # 改名需同步改 NPM，否则该域名会 502。
+    container_name: ob-mcp-pro-nick
+
+    restart: unless-stopped
+    networks:
+      - lobehub_lobe-net
+
+    ports:
+      - "3336:3333"
+
+    volumes:
+      - ${VAULT_PATH_MAIN}:/vault
+
+    # 容器变量在此显式列明 —— 刻意不使用 env_file：
+    # 否则 .env 里所有值（含用不到的 token）都会被无差别注入容器。
+    # .env 在本配置里只承担 compose 的 ${} 变量插值。
+    environment:
+      TZ: Asia/Shanghai
+      OBSIDIAN_VAULT_PATH: /vault
+      MCP_HTTP_TOKEN: ${MCP_HTTP_TOKEN_MAIN}
+      LOG_LEVEL: info
+      LOG_FORMAT: text
+      OBSIDIAN_READ_PATHS: .
+
+      # SSE keep-alive 心跳（stateful 模式防断联；stateless 下自动失效，无副作用）
+      SSE_KEEPALIVE_ENABLED: "true"
+      SSE_KEEPALIVE_INTERVAL_MS: "15000"
+
+      # 传输模式（二选一）
+      #   "false" = stateful + SSE 心跳：session 管理 + 长连接保活，兼容所有客户端
+      #   "true"  = stateless：无 session/长连接，每次请求独立，彻底免疫反代断联（治本）
+      # 修改后需重启容器生效；切换后需在 LobeHub 重新同步该 MCP
+      STATELESS_MODE: "true"
+
+      # 语义搜索（可选）。URL 与 KEY 放在 .env，不写进本文件
+      OBSIDIAN_EMBEDDING_PROVIDER: openai
+      OBSIDIAN_EMBEDDING_MODEL: qwen3.7-text-embedding
+      OBSIDIAN_EMBEDDING_URL: ${OBSIDIAN_EMBEDDING_URL}
+      OBSIDIAN_EMBEDDING_API_KEY: ${OBSIDIAN_EMBEDDING_API_KEY}
+
+      # 新建笔记的默认 frontmatter（可选）：作为最底层「只补缺失」，绝不覆盖已有键
+      #   - 已有 frontmatter：只追加缺失键，原有键的值/顺序/注释/引号逐字节不动
+      #   - 无 frontmatter：补一个完整默认块
+      #   - create_note 额外写入服务端本地日期的 created；append/prepend 回填旧笔记时不写 created
+      # 取消注释即启用；不启用时的写入行为与以前逐字节一致
+      # OBSIDIAN_DEFAULT_FRONTMATTER: '{"tags":[],"status":"draft","aliases":[]}'
+
+    command:
+      - "--transport=http"
+      - "--host=0.0.0.0"
+      - "--port=3333"
+      - "--rate-limit=600"
+
+    # 日志驱动：
+    #   db        = 群晖 Container Manager 内置驱动，日志入库，规避 json-file 的写放大；仅群晖可用
+    #   json-file = 通用驱动；此时可启用下面两个 options 限制单文件体积
+    logging:
+      driver: db
+      # options:
+      #   max-size: "10m"
+      #   max-file: "3"
+
+networks:
+  lobehub_lobe-net:
+    external: true
