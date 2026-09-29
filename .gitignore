@@ -5,6 +5,9 @@ build/
 *.tgz
 .DS_Store
 
+# Synology DSM metadata directories (created by the NAS indexer at every level)
+@eaDir/
+
 # MCP registry credentials — never commit
 .mcpregistry_*_token
 
