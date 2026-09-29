@@ -193,6 +193,36 @@ export function formatMomentDate(date: Date, format: string): string {
   return out.join("");
 }
 
+/**
+ * Substitute Obsidian-style `{{date:FORMAT}}` / `{{time:FORMAT}}` placeholders.
+ *
+ * This is the same engine — and therefore the same moment-style format tokens —
+ * that `create_daily_note` applies to a template file, extracted so that
+ * frontmatter defaults can use it as well. Without a format, `{{date}}` falls
+ * back to `YYYY-MM-DD` and `{{time}}` to `HH:mm`.
+ *
+ * Any other placeholder is left untouched, including `{{title}}`, which only
+ * has a meaning in the daily-note context.
+ */
+export function substituteDatePlaceholders(
+  input: string,
+  date = new Date()
+): string {
+  return input.replace(
+    /\{\{(date|time)(?::([^}]*))?\}\}/g,
+    (_match, token: string, format: string | undefined) => {
+      if (token === "date") {
+        return format
+          ? formatMomentDate(date, format)
+          : formatMomentDate(date, "YYYY-MM-DD");
+      }
+      return format
+        ? formatMomentDate(date, format)
+        : formatMomentDate(date, "HH:mm");
+    }
+  );
+}
+
 export function formatLocalDateOnly(date = new Date()): string {
   return [
     date.getFullYear(),

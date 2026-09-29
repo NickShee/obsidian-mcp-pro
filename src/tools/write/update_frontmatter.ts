@@ -1,7 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { updateNote } from "../../lib/vault.js";
-import { updateFrontmatter } from "../../lib/markdown.js";
+import { setFrontmatterFields, updateFrontmatter } from "../../lib/markdown.js";
+import { buildModifiedPatch } from "../../lib/frontmatter-defaults.js";
 import { defineTool, text, error } from "../../lib/tool-seam.js";
 import {
   escapeControlChars,
@@ -59,8 +60,22 @@ export function registerUpdateFrontmatter(
       }
       const props = parsed;
 
-      await updateNote(vaultPath, resolvedPath, (existing) =>
-        updateFrontmatter(existing, props)
+      await updateNote(
+        vaultPath,
+        resolvedPath,
+        (existing) => {
+          // Refresh auto-managed fields (default: `modified`) BEFORE applying
+          // the caller's values, so an explicit `modified` in `properties`
+          // still wins. The auto-touch inside updateNote is opted out because
+          // it would otherwise run after this merge and clobber that value.
+          const touched = setFrontmatterFields(
+            existing,
+            buildModifiedPatch(),
+            false
+          );
+          return updateFrontmatter(touched, props);
+        },
+        { touchModified: false }
       );
 
       return text(

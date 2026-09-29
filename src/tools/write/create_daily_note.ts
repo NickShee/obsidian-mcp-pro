@@ -3,9 +3,18 @@ import { z } from "zod";
 import { writeNote, readNote } from "../../lib/vault.js";
 import { getDailyNoteConfig } from "../../config.js";
 import { sanitizeError } from "../../lib/errors.js";
+import {
+  buildModifiedPatch,
+  resolveDefaultFrontmatter,
+} from "../../lib/frontmatter-defaults.js";
 import { defineTool, richText, error, asError } from "../../lib/tool-seam.js";
 import { formatMomentDate, parseLocalDateOnly } from "../../lib/dates.js";
-import { escapeControlChars, ensureMdExtension } from "./shared.js";
+import {
+  composeCreateContent,
+  escapeControlChars,
+  ensureMdExtension,
+  newNoteDefaults,
+} from "./shared.js";
 
 export function registerCreateDailyNote(
   server: McpServer,
@@ -97,6 +106,20 @@ export function registerCreateDailyNote(
           return error(`Error reading template: ${sanitizeError(err)}`);
         }
       }
+
+      // A daily note is a created note, so it gets the same treatment as
+      // create_note: the configured defaults plus the auto-managed date fields.
+      // `{{date…}}` placeholders and `created` both resolve against the note's
+      // OWN date, so a daily note written for a past day carries that day
+      // rather than today.
+      finalContent = composeCreateContent(
+        finalContent,
+        newNoteDefaults(
+          await resolveDefaultFrontmatter(vaultPath, targetDate),
+          buildModifiedPatch(),
+          targetDate
+        )
+      );
 
       try {
         await writeNote(vaultPath, notePath, finalContent, { exclusive: true });

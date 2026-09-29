@@ -2,7 +2,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { appendToNote } from "../../lib/vault.js";
 import { defineTool, text } from "../../lib/tool-seam.js";
-import { getDefaultFrontmatter } from "../../lib/frontmatter-defaults.js";
+import {
+  resolveDefaultFrontmatter,
+  stripAutoManagedFields,
+} from "../../lib/frontmatter-defaults.js";
 import { escapeControlChars, ensureMdExtension } from "./shared.js";
 
 export function registerAppendToNote(
@@ -45,7 +48,10 @@ export function registerAppendToNote(
         vaultPath,
         resolvedPath,
         content,
-        getDefaultFrontmatter()
+        // Backfilling an existing note: `created` and the auto-managed date
+        // fields are stripped, so an old note is never restamped as if it had
+        // been written today.
+        stripAutoManagedFields(await resolveDefaultFrontmatter(vaultPath))
       );
       return text(`Appended content to '${escapeControlChars(resolvedPath)}'.`);
     }
